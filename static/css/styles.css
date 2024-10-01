@@ -1,0 +1,76 @@
+.container {
+    display: flex;
+    height: 100vh;
+}
+
+.left-panel {
+    flex: 1;
+    background-color: #f0f0f0;
+    overflow-y: auto;
+    padding: 20px;
+}
+
+.right-panel {
+    flex: 2;
+    display: flex;
+    flex-direction: column;
+    padding: 20px;
+}
+
+.image-section img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.image-section {
+    background-color: #e0e0e0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#image-display {
+    display: block;
+    width: auto;
+    height: auto;
+}
+
+
+.prompt-section {
+    flex: 1;
+    padding: 20px;
+    background-color: #ffffff;
+    margin-top: 20px;
+}
+
+#title-list li {
+    cursor: pointer;
+    padding: 10px;
+    border-bottom: 1px solid #ccc;
+}
+
+#title-list li:hover {
+    background-color: #ddd;
+}
+
+.form-container {
+    padding: 20px;
+    background-color: #f9f9f9;
+    border: 1px solid #ddd;
+    margin-top: 20px;
+    border-radius: 5px;
+}
+
+#drop-area {
+    border: 2px dashed #ccc;
+    padding: 20px;
+    text-align: center;
+    margin-top: 10px;
+    cursor: pointer;
+}
+
+#drop-area.dragover {
+    border-color: #333;
+    background-color: #eee;
+}

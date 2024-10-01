@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Prompt Manager</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            display: flex;
+            height: 100vh;
+            margin: 0;
+            padding: 0;
+            background-color: #7a7a7a;
+        }
+
+        .container {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+
+        .title-list {
+            width: 20%;
+            padding: 10px;
+            box-sizing: border-box;
+            overflow-y: auto;
+            background-color: #a1a1a1;
+        }
+
+        .title-list li {
+            cursor: pointer;
+            margin-bottom: 10px;
+            padding: 5px;
+            background-color: #d3d3d3;
+            color: #000;
+        }
+
+        .title-list li:hover {
+            background-color: #bfbfbf;
+        }
+
+        .preview-container {
+            width: 80%;
+            padding: 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            background-color: #999999;
+        }
+
+        .image-preview-area {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 20px;
+            border: 5px solid #808080;
+            background-color: #7e7e7e;
+        }
+
+        #image-display {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            display: none;
+        }
+
+        .drop-zone {
+            border: 5px dashed #bfbfbf;
+            border-radius: 10px;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            font-size: 16px;
+            color: #999;
+            position: relative;
+        }
+
+        .drop-zone.dragover {
+            border-color: #666;
+            color: #666;
+        }
+
+        #drop-zone-text {
+            position: absolute;
+            z-index: 1;
+            color: #666;
+        }
+
+        .prompt-area {
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+        }
+
+        .prompt-input {
+            flex: 1;
+            padding: 10px;
+            font-size: 16px;
+            border: 2px solid #bfbfbf;
+            border-radius: 5px;
+            background-color: #d3d3d3;
+            margin-right: 10px;
+        }
+
+        .prompt-area .edit-button {
+            background-color: #bfbfbf;
+            border: none;
+            padding: 10px;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+
+        .prompt-area .edit-button:hover {
+            background-color: #a9a9a9;
+        }
+
+        .form-container {
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .form-container label {
+            font-size: 14px;
+            color: #fff;
+            margin-right: 10px;
+        }
+
+        .form-container input, .form-container textarea {
+            padding: 5px;
+            font-size: 14px;
+            border: 2px solid #bfbfbf;
+            border-radius: 5px;
+            background-color: #d3d3d3;
+            width: 45%;
+        }
+
+        .form-container input[type="file"] {
+            width: auto;
+        }
+
+        .form-container button {
+            padding: 10px 20px;
+            font-size: 16px;
+            color: #fff;
+            background-color: #666666;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+
+        .form-container button:hover {
+            background-color: #808080;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <ul class="title-list">
+            {% for item in data %}
+            <li onclick="showPrompt({{ loop.index0 }})">{{ item.title }}</li>
+            {% endfor %}
+        </ul>
+        <div class="preview-container">
+            <div class="image-preview-area drop-zone" id="image-preview-area">
+                <img id="image-display" src="" alt="Image">
+                <span id="drop-zone-text">Drop image here or click to select</span>
+            </div>
+            <div class="prompt-area">
+                <input type="text" id="prompt-display" class="prompt-input" readonly>
+                <button class="edit-button">&#9998;</button>
+            </div>
+            <div class="form-container">
+                <label for="title">Title:</label>
+                <input type="text" id="title" name="title" required>
+                <label for="prompt">Prompt:</label>
+                <textarea id="prompt" name="prompt" required></textarea>
+                <label for="image-file">Photo Path:</label>
+                <input type="text" id="photo-path" name="photo-path" required>
+                <input type="file" id="image-file" name="image" accept="image/*" style="display: none;">
+                <button type="submit" onclick="savePrompt()">Save</button>
+            </div>
+        </div>
+    </div>
+    <script>
+        function showPrompt(index) {
+            fetch('/copy/' + index)
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('prompt-display').value = data.prompt;
+                    document.getElementById('image-display').src = data.image_path;
+                    document.getElementById('image-display').style.display = 'block';
+
+                    // Copy prompt to clipboard
+                    navigator.clipboard.writeText(data.prompt);
+                });
+        }
+
+        function savePrompt() {
+            const title = document.getElementById('title').value;
+            const prompt = document.getElementById('prompt').value;
+            const photoPath = document.getElementById('photo-path').value;
+
+            const data = { title, prompt, photo_path: photoPath };
+
+            fetch('/save', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(data)
+            }).then(response => {
+                if (response.ok) {
+                    alert('Prompt saved successfully!');
+                } else {
+                    alert('Error saving prompt.');
+                }
+            });
+        }
+
+        const dropZone = document.getElementById('image-preview-area');
+        const imageDisplay = document.getElementById('image-display');
+        const dropZoneText = document.getElementById('drop-zone-text');
+        const imageFileInput = document.getElementById('image-file');
+
+        dropZone.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            dropZone.classList.add('dragover');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('dragover');
+        });
+
+        dropZone.addEventListener('drop', (event) => {
+            event.preventDefault();
+            dropZone.classList.remove('dragover');
+            const file = event.dataTransfer.files[0];
+            if (file) {
+                handleFile(file);
+                imageFileInput.files = event.dataTransfer.files;
+            } else {
+                const url = event.dataTransfer.getData('text/uri-list');
+                if (url) {
+                    fetch(url)
+                        .then(res => res.blob())
+                        .then(blob => {
+                            const file = new File([blob], 'dropped_image.png', { type: blob.type });
+                            handleFile(file);
+                            const dataTransfer = new DataTransfer();
+                            dataTransfer.items.add(file);
+                            imageFileInput.files = dataTransfer.files;
+                        });
+                }
+            }
+        });
+
+        dropZone.addEventListener('click', () => {
+            imageFileInput.click();
+        });
+
+        imageFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file) {
+                handleFile(file);
+            }
+        });
+
+        function handleFile(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                imageDisplay.src = e.target.result;
+                imageDisplay.style.display = 'block';
+                dropZoneText.style.display = 'none';
+                document.getElementById('photo-path').value = e.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+    </script>
+</body>
+</html>

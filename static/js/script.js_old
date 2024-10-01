@@ -1,0 +1,94 @@
+let prompts = {{ prompts | tojson | safe }};
+let selectedTitleIndex = null;
+
+// Drag-and-Drop for Image Upload
+let dropArea = document.getElementById('drop-area');
+let imagePathInput = document.getElementById('image-path');
+let imageUploadInput = document.getElementById('image-upload');
+let imageDisplay = document.getElementById('image-display');
+
+dropArea.addEventListener('dragover', function(event) {
+    event.preventDefault();
+    dropArea.classList.add('dragover');
+});
+
+dropArea.addEventListener('dragleave', function(event) {
+    dropArea.classList.remove('dragover');
+});
+
+dropArea.addEventListener('drop', function(event) {
+    event.preventDefault();
+    dropArea.classList.remove('dragover');
+
+    let files = event.dataTransfer.files;
+    handleImageUpload(files[0]);
+});
+
+imageUploadInput.addEventListener('change', function(event) {
+    let files = event.target.files;
+    handleImageUpload(files[0]);
+});
+
+function handleImageUpload(file) {
+    let formData = new FormData();
+    formData.append('image', file);
+
+    fetch('/upload_image', {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === "success") {
+            imagePathInput.value = data.path;  // Store the uploaded image path
+            imageDisplay.src = data.path;  // Display the uploaded image
+            alert('Image uploaded successfully!');
+        } else {
+            alert('Failed to upload image.');
+        }
+    })
+    .catch(err => console.error('Error uploading image:', err));
+}
+
+function selectTitle(index) {
+    if (selectedTitleIndex === index) {
+        navigator.clipboard.writeText(prompts[index].prompt)
+            .then(() => alert('Prompt copied to clipboard!'))
+            .catch(err => console.error('Error copying text:', err));
+    } else {
+        selectedTitleIndex = index;
+        imageDisplay.src = prompts[index].image_path || '';  // Handle case where there is no image
+        document.getElementById('prompt-display').textContent = prompts[index].prompt;
+    }
+}
+
+// Form submission
+document.getElementById('add-prompt-form').addEventListener('submit', function(event) {
+    event.preventDefault();
+
+    const title = document.getElementById('title').value;
+    const prompt = document.getElementById('prompt').value;
+    const imagePath = document.getElementById('image-path').value || '';  // Default to empty string if no image
+
+    const newPrompt = {
+        title: title,
+        prompt: prompt,
+        image_path: imagePath
+    };
+
+    fetch('/add_prompt', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(newPrompt)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === "success") {
+            location.reload();  // Reload the page to see the new prompt
+        } else {
+            alert('Failed to save prompt.');
+        }
+    });
+});

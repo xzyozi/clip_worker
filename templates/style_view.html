@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prompt Manager</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .prompt-list {
+            margin-top: 20px;
+        }
+        .prompt-item {
+            background-color: #f9f9f9;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 3px;
+        }
+        .prompt-item h3 {
+            margin-top: 0;
+        }
+        .form-container {
+            margin-top: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 5px;
+            margin-bottom: 10px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .image-preview-area {
+            width: 100%;
+            height: 200px;
+            border: 2px dashed #ccc;
+            border-radius: 5px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 10px;
+            position: relative;
+            overflow: hidden;
+        }
+        .image-preview-area img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        #drop-zone-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Prompt Manager</h1>
+        
+        <div class="prompt-list">
+            {% for item in data %}
+            <div class="prompt-item">
+                <h3>{{ item.title }}</h3>
+                <p>{{ item.prompt }}</p>
+                {% if item.image_path %}
+                <img src="{{ item.image_path }}" alt="Prompt Image" style="max-width: 100%; max-height: 200px;">
+                {% endif %}
+                <button onclick="copyPrompt({{ loop.index0 }})">Copy Prompt</button>
+            </div>
+            {% endfor %}
+        </div>
+
+        <div class="form-container">
+            <h2>Add New Prompt</h2>
+            <div id="image-preview-area" class="image-preview-area drop-zone">
+                <img id="image-display" src="" alt="Image Preview" style="display: none;">
+                <span id="drop-zone-text">Drop image here or click to select</span>
+            </div>
+            <form id="prompt-form">
+                <label for="title">Title:</label>
+                <input type="text" id="title" name="title" required>
+                
+                <label for="prompt">Prompt:</label>
+                <textarea id="prompt" name="prompt" rows="4" required></textarea>
+                
+                <input type="hidden" id="image_path" name="image_path">
+                
+                <button type="submit">Save</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            const dropZone = document.getElementById('image-preview-area');
+            const imageDisplay = document.getElementById('image-display');
+            const dropZoneText = document.getElementById('drop-zone-text');
+            let file;
+
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                dropZone.style.borderColor = '#999';
+            });
+
+            dropZone.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                dropZone.style.borderColor = '#ccc';
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dropZone.style.borderColor = '#ccc';
+                file = e.dataTransfer.files[0];
+                displayImage(file);
+            });
+
+            dropZone.addEventListener('click', () => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'image/*';
+                input.onchange = (e) => {
+                    file = e.target.files[0];
+                    displayImage(file);
+                };
+                input.click();
+            });
+
+            function displayImage(file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    imageDisplay.src = e.target.result;
+                    imageDisplay.style.display = 'block';
+                    dropZoneText.style.display = 'none';
+                };
+                reader.readAsDataURL(file);
+            }
+
+            $('#prompt-form').submit(function(e) {
+                e.preventDefault();
+                const formData = new FormData(this);
+                if (file) {
+                    formData.append('image', file);
+                }
+                
+                $.ajax({
+                    url: '/add',
+                    type: 'POST',
+                    data: formData,
+                    processData: false,
+                    contentType: false,
+                    success: function(response) {
+                        if (response.status === 'OK') {
+                            alert('Prompt saved successfully!');
+                            location.reload();
+                        } else {
+                            alert('Error saving prompt');
+                        }
+                    },
+                    error: function() {
+                        alert('Error saving prompt');
+                    }
+                });
+            });
+        });
+
+        function copyPrompt(index) {
+            $.get('/copy/' + index, function(data) {
+                $('#title').val(data.title);
+                $('#prompt').val(data.prompt);
+                $('#image_path').val(data.image_path);
+                if (data.image_path) {
+                    $('#image-display').attr('src', data.image_path).show();
+                    $('#drop-zone-text').hide();
+                } else {
+                    $('#image-display').hide();
+                    $('#drop-zone-text').show();
+                }
+            });
+        }
+    </script>
+</body>
+</html>
