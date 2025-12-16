@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prompt Manager (React)</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    
+    <!-- Babel (JSX変換用) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS (デザイン用) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Libraries -->
+    <script src="https://unpkg.com/dexie@3.2.4/dist/dexie.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body { background-color: #f3f4f6; font-family: 'Segoe UI', sans-serif; }
+        .prompt-scroll::-webkit-scrollbar { width: 6px; }
+        .prompt-scroll::-webkit-scrollbar-track { background: #f1f1f1; }
+        .prompt-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        .prompt-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        button:active { transform: translateY(1px); }
+    </style>
+</head>
+<body>
+    <!-- Reactのマウントポイント -->
+    <div id="root" class="flex items-center justify-center min-h-screen text-gray-500">
+        <div class="text-center">
+            <i class="fas fa-spinner fa-spin text-4xl mb-4 text-green-500"></i>
+            <p>アプリを読み込んでいます...</p>
+        </div>
+    </div>
+
+    <script type="text/babel">
+        // --- 0. Helper Functions (Environment Safe) ---
+        // UUID生成の互換性確保 (HTTPS以外でも動作するように修正)
+        const generateUUID = () => {
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+                try {
+                    return crypto.randomUUID();
+                } catch (e) {
+                    console.warn("crypto.randomUUID failed, using fallback");
+                }
+            }
+            // Fallback for insecure contexts
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        };
+
+        // --- 1. Database Setup (Dexie.js) ---
+        const db = new Dexie("PromptManagerDB");
+        db.version(1).stores({
+            prompts: "++id, uuid, title, prompt, createdAt" 
+        });
+
+        // --- 2. Utility Functions ---
+        const copyToClipboard = (text) => {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                return true;
+            } catch (err) {
+                console.error('Copy failed', err);
+                return false;
+            } finally {
+                document.body.removeChild(textarea);
+            }
+        };
+
+        const formatDate = (isoString) => {
+            if (!isoString) return '';
+            const d = new Date(isoString);
+            const pad = (n) => n.toString().padStart(2, '0');
+            return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+        };
+
+        // --- 3. Components ---
+
+        const Header = ({ onExport, onClearAll }) => (
+            <header className="flex flex-col md:flex-row justify-between items-center mb-8 bg-white p-4 rounded-lg shadow-sm border border-gray-200">
+                <h1 className="text-2xl font-bold text-gray-800 mb-4 md:mb-0 flex items-center">
+                    <i className="fas fa-images text-green-500 mr-2"></i>Prompt Manager
+                </h1>
+                <div className="flex gap-3">
+                    <button 
+                        onClick={onExport} 
+                        className="px-4 py-2 border border-gray-600 text-gray-700 rounded hover:bg-gray-700 hover:text-white transition flex items-center gap-2 bg-white"
+                    >
+                        <i className="fas fa-file-export"></i> Export ZIP
+                    </button>
+                    <button 
+                        onClick={onClearAll} 
+                        className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition flex items-center gap-2"
+                    >
+                        <i className="fas fa-trash-alt"></i> 全削除
+                    </button>
+                </div>
+            </header>
+        );
+
+        const UploadForm = ({ onSave, isSaving }) => {
+            const [title, setTitle] = React.useState("");
+            const [prompt, setPrompt] = React.useState("");
+            const [file, setFile] = React.useState(null);
+            const [preview, setPreview] = React.useState(null);
+            const fileInputRef = React.useRef(null);
+
+            const handleFile = (selected) => {
+                if (selected && selected.type.startsWith('image/')) {
+                    setFile(selected);
+                    const reader = new FileReader();
+                    reader.onload = (ev) => setPreview(ev.target.result);
+                    reader.readAsDataURL(selected);
+                }
+            };
+
+            const handleChange = (e) => handleFile(e.target.files[0]);
+            
+            const handleDrop = (e) => {
+                e.preventDefault();
+                handleFile(e.dataTransfer.files[0]);
+            };
+
+            const handleSubmit = () => {
+                if (!title || !prompt) {
+                    alert("タイトルとプロンプトは必須です。");
+                    return;
+                }
+                onSave({ title, prompt, file }, () => {
+                    setTitle("");
+                    setPrompt("");
+                    setFile(null);
+                    setPreview(null);
+                    if(fileInputRef.current) fileInputRef.current.value = "";
+                });
+            };
+
+            return (
+                <div className="bg-white p-6 rounded-xl shadow-md mb-8 flex flex-col md:flex-row gap-6 border border-gray-200">
+                    <div 
+                        className={`flex-1 min-h-[250px] border-2 border-dashed rounded-lg flex flex-col items-center justify-center cursor-pointer relative overflow-hidden transition-colors ${preview ? 'border-green-500 bg-green-50' : 'border-gray-300 hover:bg-gray-50'}`}
+                        onClick={() => fileInputRef.current.click()}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={handleDrop}
+                    >
+                        {preview ? (
+                            <img src={preview} alt="Preview" className="absolute inset-0 w-full h-full object-contain p-2" />
+                        ) : (
+                            <div className="text-center text-gray-400">
+                                <i className="fas fa-cloud-upload-alt text-4xl mb-3"></i>
+                                <p>Click or Drag Image</p>
+                            </div>
+                        )}
+                        <input type="file" ref={fileInputRef} onChange={handleChange} accept="image/*" className="hidden" />
+                    </div>
+
+                    <div className="flex-[1.5] flex flex-col gap-4">
+                        <div>
+                            <label className="block text-gray-700 font-bold mb-1 text-sm">タイトル / Title</label>
+                            <input 
+                                type="text" 
+                                value={title}
+                                onChange={(e) => setTitle(e.target.value)}
+                                className="w-full p-3 border border-gray-300 rounded focus:outline-none focus:border-green-500"
+                                placeholder="例: ファンタジー風景..."
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-gray-700 font-bold mb-1 text-sm">プロンプト / Prompt</label>
+                            <textarea 
+                                value={prompt}
+                                onChange={(e) => setPrompt(e.target.value)}
+                                className="w-full p-3 border border-gray-300 rounded focus:outline-none focus:border-green-500 min-h-[120px] font-mono text-sm"
+                                placeholder="masterpiece, best quality..."
+                            ></textarea>
+                        </div>
+                        <button 
+                            onClick={handleSubmit} 
+                            disabled={isSaving}
+                            className="self-start bg-green-500 text-white px-8 py-3 rounded font-bold hover:bg-green-600 transition disabled:opacity-50 flex items-center gap-2 shadow-sm"
+                        >
+                            {isSaving ? <i className="fas fa-spinner fa-spin"></i> : <i className="fas fa-save"></i>}
+                            保存する
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        const PromptCard = ({ item, onDelete, onOpenModal }) => {
+            const [imageUrl, setImageUrl] = React.useState(null);
+            const [copyStatus, setCopyStatus] = React.useState("Copy");
+
+            React.useEffect(() => {
+                let url;
+                if (item.imageBlob) {
+                    url = URL.createObjectURL(item.imageBlob);
+                    setImageUrl(url);
+                }
+                return () => { if (url) URL.revokeObjectURL(url); };
+            }, [item.imageBlob]);
+
+            const handleCopy = () => {
+                if (copyToClipboard(item.prompt)) {
+                    setCopyStatus("Copied!");
+                    setTimeout(() => setCopyStatus("Copy"), 1500);
+                }
+            };
+
+            const handleDelete = (e) => {
+                e.stopPropagation();
+                if (window.confirm(`「${item.title}」を削除してもよろしいですか？`)) {
+                    onDelete(item.id);
+                }
+            };
+
+            return (
+                <div className="bg-white rounded-lg shadow-sm border border-gray-200 hover:shadow-lg transition-all duration-200 hover:-translate-y-1 overflow-hidden flex flex-col h-full group relative">
+                    <button 
+                        onClick={handleDelete}
+                        className="absolute top-2 right-2 bg-red-500 text-white w-8 h-8 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition z-10 shadow-md hover:bg-red-600"
+                        title="削除"
+                    >
+                        <i className="fas fa-times"></i>
+                    </button>
+
+                    <div 
+                        className="relative pt-[75%] bg-gray-100 cursor-pointer overflow-hidden border-b border-gray-100"
+                        onClick={() => onOpenModal(imageUrl, item.imageBlob)}
+                    >
+                        {imageUrl ? (
+                            <img src={imageUrl} alt={item.title} className="absolute inset-0 w-full h-full object-cover transition duration-300 hover:scale-105" />
+                        ) : (
+                            <div className="absolute inset-0 flex items-center justify-center text-gray-300">
+                                <i className="fas fa-image text-4xl"></i>
+                            </div>
+                        )}
+                    </div>
+                    
+                    <div className="p-4 flex flex-col flex-grow">
+                        <h3 className="font-bold text-gray-800 text-lg mb-2 truncate" title={item.title}>{item.title}</h3>
+                        <div className="bg-gray-50 border border-gray-200 rounded p-2 text-sm text-gray-600 font-mono mb-3 flex-grow overflow-y-auto max-h-[100px] prompt-scroll whitespace-pre-wrap leading-relaxed">
+                            {item.prompt}
+                        </div>
+                        <div className="pt-2 border-t border-gray-100 flex justify-between items-center text-xs text-gray-500 mt-auto">
+                            <span>{formatDate(item.createdAt)}</span>
+                            <button 
+                                onClick={handleCopy}
+                                className={`px-3 py-1 border rounded transition flex items-center gap-1 ${copyStatus === 'Copied!' ? 'bg-green-100 border-green-300 text-green-700' : 'bg-white border-gray-300 hover:bg-gray-50 text-gray-600'}`}
+                            >
+                                <i className="fas fa-copy"></i> {copyStatus}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ImageModal = ({ isOpen, imageUrl, imageBlob, onClose }) => {
+            const [exifData, setExifData] = React.useState(null);
+
+            React.useEffect(() => {
+                if (isOpen && imageBlob) {
+                    setExifData(null);
+                    try {
+                        EXIF.getData(imageBlob, function() {
+                            const allTags = EXIF.getAllTags(this);
+                            const displayTags = {};
+                            const targets = ['Make', 'Model', 'Software', 'DateTime', 'PixelXDimension', 'PixelYDimension'];
+                            targets.forEach(key => {
+                                if (allTags[key]) displayTags[key] = allTags[key];
+                            });
+                            if (Object.keys(displayTags).length > 0) {
+                                setExifData(displayTags);
+                            }
+                        });
+                    } catch(e) { console.error("EXIF error", e); }
+                }
+            }, [isOpen, imageBlob]);
+
+            if (!isOpen) return null;
+
+            return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-90 backdrop-blur-sm p-4" onClick={onClose}>
+                    <button onClick={onClose} className="absolute top-4 right-4 text-white text-4xl hover:text-gray-300 z-50">&times;</button>
+                    
+                    <div className="flex flex-col md:flex-row gap-4 max-w-full max-h-full items-center justify-center" onClick={e => e.stopPropagation()}>
+                        <div className="flex-shrink-1 overflow-hidden rounded relative">
+                            <img src={imageUrl} alt="Full size" className="max-w-full max-h-[85vh] object-contain shadow-2xl" />
+                        </div>
+                        
+                        {exifData && (
+                            <div className="w-full md:w-[300px] bg-gray-900 bg-opacity-90 text-white p-4 rounded overflow-y-auto max-h-[30vh] md:max-h-[85vh] border border-gray-700 shadow-xl">
+                                <h3 className="text-lg font-bold border-b border-gray-600 pb-2 mb-2">EXIF Data</h3>
+                                <div className="space-y-2 text-sm">
+                                    {Object.entries(exifData).map(([key, val]) => (
+                                        <div key={key} className="flex justify-between border-b border-gray-800 pb-1">
+                                            <span className="text-gray-400">{key}</span>
+                                            <span className="font-mono text-right text-gray-200">{String(val)}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        };
+
+        const Pagination = ({ totalItems, itemsPerPage, currentPage, onPageChange }) => {
+            const totalPages = Math.ceil(totalItems / itemsPerPage);
+            if (totalPages <= 1) return null;
+
+            const handlePageChange = (newPage) => {
+                if (newPage >= 1 && newPage <= totalPages) {
+                    onPageChange(newPage);
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            };
+
+            const pages = [];
+            for (let i = 1; i <= totalPages; i++) {
+                pages.push(i);
+            }
+
+            return (
+                <div className="flex justify-center items-center gap-2 mt-8 mb-12 flex-wrap">
+                    <button 
+                        onClick={() => handlePageChange(currentPage - 1)}
+                        disabled={currentPage === 1}
+                        className="px-3 py-2 border rounded bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <i className="fas fa-chevron-left"></i>
+                    </button>
+
+                    {pages.map(page => (
+                        <button
+                            key={page}
+                            onClick={() => handlePageChange(page)}
+                            className={`min-w-[40px] h-10 rounded border font-bold transition shadow-sm ${
+                                currentPage === page 
+                                    ? 'bg-green-500 text-white border-green-500' 
+                                    : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                            }`}
+                        >
+                            {page}
+                        </button>
+                    ))}
+
+                    <button 
+                        onClick={() => handlePageChange(currentPage + 1)}
+                        disabled={currentPage === totalPages}
+                        className="px-3 py-2 border rounded bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                        <i className="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            );
+        };
+
+        // --- 4. Main App ---
+        const App = () => {
+            const [items, setItems] = React.useState([]);
+            const [currentPage, setCurrentPage] = React.useState(1);
+            const [isSaving, setIsSaving] = React.useState(false);
+            const [modalState, setModalState] = React.useState({ isOpen: false, url: null, blob: null });
+
+            const itemsPerPage = 12;
+
+            const loadData = async () => {
+                const allPrompts = await db.prompts.orderBy('id').reverse().toArray();
+                setItems(allPrompts);
+            };
+
+            React.useEffect(() => {
+                loadData();
+            }, []);
+
+            const handleSave = async ({ title, prompt, file }, onSuccess) => {
+                setIsSaving(true);
+                try {
+                    // ここで安全なUUID生成関数を使用
+                    const uuid = generateUUID();
+                    await db.prompts.add({
+                        uuid,
+                        title,
+                        prompt,
+                        imageBlob: file, 
+                        imageType: file ? file.type : 'image/png',
+                        createdAt: new Date().toISOString()
+                    });
+                    await loadData();
+                    onSuccess();
+                    setCurrentPage(1);
+                } catch (err) {
+                    console.error(err);
+                    alert("保存エラー: " + err.message);
+                } finally {
+                    setIsSaving(false);
+                }
+            };
+
+            const handleDelete = async (id) => {
+                try {
+                    await db.prompts.delete(id);
+                    await loadData();
+                    const newTotalItems = items.length - 1;
+                    const maxPage = Math.ceil(newTotalItems / itemsPerPage);
+                    if (currentPage > maxPage && maxPage > 0) {
+                        setCurrentPage(maxPage);
+                    }
+                } catch (err) {
+                    alert("削除エラー: " + err.message);
+                }
+            };
+
+            const handleExport = async () => {
+                if (items.length === 0) return alert("データがありません。");
+                if (!confirm("ZIPファイルを生成しますか？\n（画像とJSONデータが含まれます）")) return;
+
+                const zip = new JSZip();
+                const dataFolder = zip.folder("data");
+                const imagesFolder = dataFolder.folder("images");
+                const jsonExportData = [];
+
+                items.forEach(item => {
+                    let imageFileName = "";
+                    if (item.imageBlob) {
+                        const ext = item.imageType.split('/')[1] || 'png';
+                        imageFileName = `${item.uuid}.${ext}`;
+                        imagesFolder.file(imageFileName, item.imageBlob);
+                    }
+                    jsonExportData.push({
+                        id: item.uuid,
+                        title: item.title,
+                        prompt: item.prompt,
+                        image_path: imageFileName ? `/data/images/${imageFileName}` : "",
+                        created_at: item.createdAt
+                    });
+                });
+
+                dataFolder.file("prompts.json", JSON.stringify(jsonExportData, null, 4));
+                const content = await zip.generateAsync({ type: "blob" });
+                saveAs(content, "prompt_manager_backup.zip");
+            };
+
+            const handleClearAll = async () => {
+                if (confirm("【警告】すべてのデータを削除しますか？\nこの操作は取り消せません。")) {
+                    await db.prompts.clear();
+                    await loadData();
+                    setCurrentPage(1);
+                }
+            };
+
+            const indexOfLastItem = currentPage * itemsPerPage;
+            const indexOfFirstItem = indexOfLastItem - itemsPerPage;
+            const currentItems = items.slice(indexOfFirstItem, indexOfLastItem);
+
+            return (
+                <div className="container mx-auto px-4 py-8 max-w-7xl">
+                    <Header onExport={handleExport} onClearAll={handleClearAll} />
+                    
+                    <UploadForm onSave={handleSave} isSaving={isSaving} />
+
+                    {items.length === 0 && (
+                        <div className="text-center py-12 text-gray-500 border-2 border-dashed border-gray-300 rounded-lg">
+                            <i className="fas fa-folder-open text-4xl mb-4 text-gray-300"></i>
+                            <p>データがありません。画像をアップロードして保存してください。</p>
+                        </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 mb-8">
+                        {currentItems.map(item => (
+                            <PromptCard 
+                                key={item.id} 
+                                item={item} 
+                                onDelete={handleDelete}
+                                onOpenModal={(url, blob) => setModalState({ isOpen: true, url, blob })}
+                            />
+                        ))}
+                    </div>
+
+                    <Pagination 
+                        totalItems={items.length} 
+                        itemsPerPage={itemsPerPage} 
+                        currentPage={currentPage}
+                        onPageChange={setCurrentPage}
+                    />
+
+                    <ImageModal 
+                        isOpen={modalState.isOpen}
+                        imageUrl={modalState.url}
+                        imageBlob={modalState.blob}
+                        onClose={() => setModalState({ ...modalState, isOpen: false })}
+                    />
+                </div>
+            );
+        };
+
+        // --- 5. Mount ---
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
